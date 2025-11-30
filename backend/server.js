@@ -261,9 +261,8 @@ app.post('/api/predict', async (req, res) => {
     // Generate stock photo description
     const stockPhotoDesc = generateStockPhotoDescription(elementsArray);
     
-    // Generate image URL (using Lorem Picsum - free, no API key)
-    const randomId = Math.floor(Math.random() * 1000);
-    const stockImageUrl = `https://picsum.photos/800/600?random=${randomId}`;
+    // Generate image URL (using Unsplash - people-focused stock photos)
+    const stockImageUrl = generatePeopleStockPhotoUrl();
     
     const prediction = {
         components: elementsArray,
@@ -322,8 +321,7 @@ app.get('/api/predictions', async (req, res) => {
         // Add default image fields for predictions that don't have them
         const docsWithImages = docs.map(doc => {
             if (!doc.stockImageUrl) {
-                const randomId = doc._id ? doc._id.charCodeAt(0) * 1000 : Math.floor(Math.random() * 1000);
-                doc.stockImageUrl = `https://picsum.photos/800/600?random=${randomId}`;
+                doc.stockImageUrl = generatePeopleStockPhotoUrl();
             }
             if (!doc.stockPhotoDescription) {
                 doc.stockPhotoDescription = `Corporate event documentation`;
@@ -594,6 +592,36 @@ function getTomorrowDate() {
     return tomorrow.toISOString().split('T')[0];
 }
 
+// Generate stock photo URL with people (using Unsplash)
+function generatePeopleStockPhotoUrl() {
+    // People-focused search terms for Unsplash
+    const peopleTerms = [
+        'people,business,office',
+        'people,team,meeting',
+        'people,professional,work',
+        'people,corporate,office',
+        'people,conference,meeting',
+        'people,handshake,business',
+        'people,group,office',
+        'people,teamwork,office',
+        'people,presentation,business',
+        'people,workspace,office',
+        'people,meeting,conference',
+        'people,business,professional',
+        'people,office,team',
+        'people,corporate,meeting',
+        'people,workplace,team'
+    ];
+    
+    // Pick a random search term
+    const searchTerm = peopleTerms[Math.floor(Math.random() * peopleTerms.length)];
+    
+    // Use Unsplash Source API (no key needed, but may be rate limited)
+    // Format: https://source.unsplash.com/800x600/?searchterm
+    const randomId = Math.floor(Math.random() * 10000);
+    return `https://source.unsplash.com/800x600/?${searchTerm}&sig=${randomId}`;
+}
+
 // Add stock photo description generator
 // In backend/server.js, add this function before your routes:
 
@@ -680,9 +708,8 @@ app.post('/api/predict/from-url', async (req, res) => {
         // Generate stock photo description
         const stockPhotoDesc = generateStockPhotoDescription(elementsArray);
         
-        // Generate image URL
-        const randomId = Math.floor(Math.random() * 1000);
-        const stockImageUrl = `https://picsum.photos/800/600?random=${randomId}`;
+        // Generate image URL (using Unsplash - people-focused stock photos)
+        const stockImageUrl = generatePeopleStockPhotoUrl();
         
         const prediction = {
             components: elementsArray,
@@ -845,9 +872,8 @@ async function fetchAndGeneratePredictions() {
                 // Generate stock photo description
                 const stockPhotoDesc = generateStockPhotoDescription(elementsArray);
                 
-                // Generate image URL
-                const randomId = Math.floor(Math.random() * 1000);
-                const stockImageUrl = `https://picsum.photos/800/600?random=${randomId}`;
+                // Generate image URL (using Unsplash - people-focused stock photos)
+                const stockImageUrl = generatePeopleStockPhotoUrl();
                 
                 const prediction = {
                     components: elementsArray,

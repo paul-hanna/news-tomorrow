@@ -1391,6 +1391,10 @@ function App() {
       const isInputFocused = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
 
       if (e.key.toLowerCase() === 'u' && !isInputFocused && !showUrlInput) {
+        // Exit pointer lock when opening menu
+        if (document.pointerLockElement) {
+          document.exitPointerLock()
+        }
         setShowUrlInput(true)
         // Focus the input when opening
         setTimeout(() => {
@@ -1406,12 +1410,26 @@ function App() {
         setShowUrlInput(false)
         setUrlError('')
         setUrlInput('')
+        // Re-enter pointer lock when closing menu - click on canvas
+        setTimeout(() => {
+          const canvas = document.querySelector('canvas')
+          if (canvas) {
+            canvas.click() // This will trigger pointer lock via PointerLockControls
+          }
+        }, 100)
       }
       // Also close on Escape
       if (e.key === 'Escape' && showUrlInput) {
         setShowUrlInput(false)
         setUrlError('')
         setUrlInput('')
+        // Re-enter pointer lock when closing menu - click on canvas
+        setTimeout(() => {
+          const canvas = document.querySelector('canvas')
+          if (canvas) {
+            canvas.click() // This will trigger pointer lock via PointerLockControls
+          }
+        }, 100)
       }
     }
 
@@ -1551,6 +1569,14 @@ function App() {
       setUrlInput('')
       setShowUrlInput(false)
       
+      // Re-enter pointer lock after successful submission - click on canvas
+      setTimeout(() => {
+        const canvas = document.querySelector('canvas')
+        if (canvas) {
+          canvas.click() // This will trigger pointer lock via PointerLockControls
+        }
+      }, 100)
+      
       console.log('✅ Prediction generated from URL and saved to database:', response.data.headline)
     } catch (error) {
       console.error('Error generating prediction from URL:', error)
@@ -1575,10 +1601,17 @@ function App() {
                 setShowUrlInput(false)
                 setUrlError('')
                 setUrlInput('')
+                // Re-enter pointer lock when closing menu - click on canvas
+                setTimeout(() => {
+                  const canvas = document.querySelector('canvas')
+                  if (canvas) {
+                    canvas.click() // This will trigger pointer lock via PointerLockControls
+                  }
+                }, 100)
               }}
               title="Press X to close"
             >
-              X
+              ×
             </button>
             <h2>Generate Prediction from Article URL</h2>
             <p className="url-input-description">

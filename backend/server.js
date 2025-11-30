@@ -30,14 +30,44 @@ try {
 }
 
 // Middleware
-// CORS configuration - allow GitHub Pages and local dev
+// CORS configuration - allow GitHub Pages, custom domains, and local dev
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  process.env.FRONTEND_URL,
+  'https://paul.tube',  // Custom domain
+  /\.github\.io$/,  // Allow any GitHub Pages domain
+  /^https?:\/\/[^/]*\.tube(\/|$)/,  // Allow any *.tube domain
+];
+
+// Add custom domain patterns if specified via environment variable
+if (process.env.ALLOWED_ORIGINS) {
+  const customOrigins = process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim());
+  allowedOrigins.push(...customOrigins);
+}
+
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    process.env.FRONTEND_URL,
-    /\.github\.io$/,  // Allow any GitHub Pages domain
-  ].filter(Boolean),  // Remove undefined values
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin matches any allowed pattern
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (typeof allowed === 'string') {
+        return origin === allowed || origin.startsWith(allowed + '/');
+      } else if (allowed instanceof RegExp) {
+        return allowed.test(origin);
+      }
+      return false;
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.warn(`⚠️  CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 app.use(express.json());

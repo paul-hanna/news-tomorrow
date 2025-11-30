@@ -261,8 +261,8 @@ app.post('/api/predict', async (req, res) => {
     // Generate stock photo description
     const stockPhotoDesc = generateStockPhotoDescription(elementsArray);
     
-    // Generate image URL (using Unsplash - people-focused stock photos)
-    const stockImageUrl = generatePeopleStockPhotoUrl();
+    // Generate image URL (using Pexels API - people-focused stock photos)
+    const stockImageUrl = await generatePeopleStockPhotoUrl();
     
     const prediction = {
         components: elementsArray,
@@ -319,15 +319,16 @@ app.get('/api/predictions', async (req, res) => {
         }
         
         // Add default image fields for predictions that don't have them
-        const docsWithImages = docs.map(doc => {
-            if (!doc.stockImageUrl) {
-                doc.stockImageUrl = generatePeopleStockPhotoUrl();
+        const docsWithImages = await Promise.all(docs.map(async (doc) => {
+            if (!doc.stockImageUrl || doc.stockImageUrl.includes('picsum.photos')) {
+                // Generate new photo URL for missing or old Lorem Picsum URLs
+                doc.stockImageUrl = await generatePeopleStockPhotoUrl();
             }
             if (!doc.stockPhotoDescription) {
                 doc.stockPhotoDescription = `Corporate event documentation`;
             }
             return doc;
-        });
+        }));
         
         res.json(docsWithImages);
     } catch (error) {
@@ -592,34 +593,51 @@ function getTomorrowDate() {
     return tomorrow.toISOString().split('T')[0];
 }
 
-// Generate stock photo URL with people (using Unsplash)
-function generatePeopleStockPhotoUrl() {
-    // People-focused search terms for Unsplash
-    const peopleTerms = [
-        'people,business,office',
-        'people,team,meeting',
-        'people,professional,work',
-        'people,corporate,office',
-        'people,conference,meeting',
-        'people,handshake,business',
-        'people,group,office',
-        'people,teamwork,office',
-        'people,presentation,business',
-        'people,workspace,office',
-        'people,meeting,conference',
-        'people,business,professional',
-        'people,office,team',
-        'people,corporate,meeting',
-        'people,workplace,team'
-    ];
+// Generate stock photo URL with people using Pexels API
+// Falls back to Lorem Picsum (original method) if API key is missing or request fails
+async function generatePeopleStockPhotoUrl() {
+    // If Pexels API key is available, use it to get people photos
+    if (process.env.PEXELS_API_KEY) {
+        try {
+            // Search terms that typically return photos with people
+            const searchTerms = [
+                'business people', 'office team', 'professional meeting', 'corporate people',
+                'team work', 'business meeting', 'office workers', 'professional team',
+                'business professionals', 'office collaboration', 'team discussion', 'corporate team'
+            ];
+            
+            const randomTerm = searchTerms[Math.floor(Math.random() * searchTerms.length)];
+            
+            // Call Pexels API
+            // Pexels uses just the API key (not "Bearer {key}")
+            const apiKey = process.env.PEXELS_API_KEY;
+            const response = await axios.get('https://api.pexels.com/v1/search', {
+                params: {
+                    query: randomTerm,
+                    per_page: 20, // Get 20 results to pick from
+                    orientation: 'landscape'
+                },
+                headers: {
+                    'Authorization': apiKey
+                },
+                timeout: 5000 // 5 second timeout
+            });
+            
+            if (response.data && response.data.photos && response.data.photos.length > 0) {
+                // Pick a random photo from the results
+                const randomPhoto = response.data.photos[Math.floor(Math.random() * response.data.photos.length)];
+                // Use medium size (800x600 or closest)
+                return randomPhoto.src.medium || randomPhoto.src.large || randomPhoto.src.original;
+            }
+        } catch (error) {
+            console.warn('⚠️  Pexels API error, falling back to Lorem Picsum:', error.message);
+            // Fall through to fallback
+        }
+    }
     
-    // Pick a random search term
-    const searchTerm = peopleTerms[Math.floor(Math.random() * peopleTerms.length)];
-    
-    // Use Unsplash Source API (no key needed, but may be rate limited)
-    // Format: https://source.unsplash.com/800x600/?searchterm
-    const randomId = Math.floor(Math.random() * 10000);
-    return `https://source.unsplash.com/800x600/?${searchTerm}&sig=${randomId}`;
+    // Fallback: Lorem Picsum (original method - reliable but doesn't guarantee people)
+    const randomId = Math.floor(Math.random() * 1000);
+    return `https://picsum.photos/seed/business${randomId}/800/600`;
 }
 
 // Add stock photo description generator
@@ -708,8 +726,8 @@ app.post('/api/predict/from-url', async (req, res) => {
         // Generate stock photo description
         const stockPhotoDesc = generateStockPhotoDescription(elementsArray);
         
-        // Generate image URL (using Unsplash - people-focused stock photos)
-        const stockImageUrl = generatePeopleStockPhotoUrl();
+        // Generate image URL (using Pexels API - people-focused stock photos, falls back to Lorem Picsum)
+        const stockImageUrl = await generatePeopleStockPhotoUrl();
         
         const prediction = {
             components: elementsArray,
@@ -872,8 +890,8 @@ async function fetchAndGeneratePredictions() {
                 // Generate stock photo description
                 const stockPhotoDesc = generateStockPhotoDescription(elementsArray);
                 
-                // Generate image URL (using Unsplash - people-focused stock photos)
-                const stockImageUrl = generatePeopleStockPhotoUrl();
+                // Generate image URL (using Pexels API - people-focused stock photos)
+                const stockImageUrl = await generatePeopleStockPhotoUrl();
                 
                 const prediction = {
                     components: elementsArray,

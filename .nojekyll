@@ -1,0 +1,3 @@
+# This file disables Jekyll processing on GitHub Pages
+# Since we're deploying a Vite-built React app, we don't need Jekyll
+

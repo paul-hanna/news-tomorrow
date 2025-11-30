@@ -319,14 +319,48 @@ app.get('/api/predictions', async (req, res) => {
         }
         
         // Add default image fields for predictions that don't have them
+        // Also update old Lorem Picsum URLs to new Pexels URLs and save to database
         const docsWithImages = await Promise.all(docs.map(async (doc) => {
+            let needsUpdate = false;
+            const updateData = {};
+            
             if (!doc.stockImageUrl || doc.stockImageUrl.includes('picsum.photos')) {
                 // Generate new photo URL for missing or old Lorem Picsum URLs
-                doc.stockImageUrl = await generatePeopleStockPhotoUrl();
+                const newImageUrl = await generatePeopleStockPhotoUrl();
+                doc.stockImageUrl = newImageUrl;
+                updateData.stockImageUrl = newImageUrl;
+                needsUpdate = true;
+                console.log(`🖼️  Updating image URL for prediction ${doc._id}: ${newImageUrl}`);
             }
             if (!doc.stockPhotoDescription) {
                 doc.stockPhotoDescription = `Corporate event documentation`;
+                updateData.stockPhotoDescription = doc.stockPhotoDescription;
+                needsUpdate = true;
             }
+            
+            // Save updated image URL to database if it changed
+            if (needsUpdate) {
+                try {
+                    if (usePostgres) {
+                        await db.update({ _id: doc._id }, updateData);
+                        console.log(`✅ Updated prediction ${doc._id} in PostgreSQL`);
+                    } else {
+                        // NeDB update
+                        await new Promise((resolve, reject) => {
+                            db.update({ _id: doc._id }, { $set: updateData }, {}, (err, numReplaced) => {
+                                if (err) reject(err);
+                                else {
+                                    console.log(`✅ Updated prediction ${doc._id} in NeDB`);
+                                    resolve(numReplaced);
+                                }
+                            });
+                        });
+                    }
+                } catch (error) {
+                    console.error(`❌ Failed to update prediction ${doc._id}:`, error.message);
+                }
+            }
+            
             return doc;
         }));
         
@@ -609,7 +643,7 @@ async function generatePeopleStockPhotoUrl() {
             const randomTerm = searchTerms[Math.floor(Math.random() * searchTerms.length)];
             
             // Call Pexels API
-            // Pexels uses just the API key (not "Bearer {key}")
+            // Pexels API uses just the API key as the Authorization header value (not "Bearer {key}")
             const apiKey = process.env.PEXELS_API_KEY;
             const response = await axios.get('https://api.pexels.com/v1/search', {
                 params: {
@@ -618,19 +652,31 @@ async function generatePeopleStockPhotoUrl() {
                     orientation: 'landscape'
                 },
                 headers: {
-                    'Authorization': apiKey
+                    'Authorization': apiKey.trim() // Remove any whitespace
                 },
-                timeout: 5000 // 5 second timeout
+                timeout: 10000 // 10 second timeout (increased for reliability)
             });
+            
+            // Log API response for debugging
+            if (response.status !== 200) {
+                console.warn(`⚠️  Pexels API returned status ${response.status}`);
+            }
             
             if (response.data && response.data.photos && response.data.photos.length > 0) {
                 // Pick a random photo from the results
                 const randomPhoto = response.data.photos[Math.floor(Math.random() * response.data.photos.length)];
-                // Use medium size (800x600 or closest)
-                return randomPhoto.src.medium || randomPhoto.src.large || randomPhoto.src.original;
+                // Use medium size (800x600 or closest), fallback to large or original
+                const imageUrl = randomPhoto.src.medium || randomPhoto.src.large || randomPhoto.src.original;
+                console.log(`✅ Pexels API success: Found ${response.data.photos.length} photos, selected: ${imageUrl}`);
+                return imageUrl;
+            } else {
+                console.warn('⚠️  Pexels API returned no photos');
             }
         } catch (error) {
             console.warn('⚠️  Pexels API error, falling back to Lorem Picsum:', error.message);
+            if (error.response) {
+                console.warn(`   Status: ${error.response.status}, Data:`, error.response.data);
+            }
             // Fall through to fallback
         }
     }

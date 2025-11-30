@@ -5,6 +5,8 @@ const { generateAIHeadline } = require('./aiHeadlineGenerator');
 const express = require('express');
 const cors = require('cors');
 const Datastore = require('nedb');
+const cron = require('node-cron');
+const { scrapeNYTimesHomepage } = require('./nytimesScraper');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -35,12 +37,13 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   process.env.FRONTEND_URL,
-  'https://paul.tube',  // Custom domain
-  /\.github\.io$/,  // Allow any GitHub Pages domain
-  /^https?:\/\/[^/]*\.tube(\/|$)/,  // Allow any *.tube domain
+  'https://paul.tube',  // Your specific custom domain
+  /\.github\.io$/,  // Allow any GitHub Pages domain (safe - GitHub controls these)
 ];
 
 // Add custom domain patterns if specified via environment variable
+// Use this for additional specific domains, not wildcards
+// Example: ALLOWED_ORIGINS=https://example.com,https://another.com
 if (process.env.ALLOWED_ORIGINS) {
   const customOrigins = process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim());
   allowedOrigins.push(...customOrigins);
@@ -64,7 +67,8 @@ app.use(cors({
     if (isAllowed) {
       callback(null, true);
     } else {
-      console.warn(`⚠️  CORS blocked origin: ${origin}`);
+      // Log blocked requests for security monitoring
+      console.warn(`🚫 CORS blocked origin: ${origin} (not in allowed list)`);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -118,6 +122,26 @@ app.post('/api/populate/yesterday', async (req, res) => {
     } catch (error) {
         console.error('Error populating yesterday articles:', error);
         res.status(500).json({ error: 'Failed to populate: ' + error.message });
+    }
+});
+
+// Manual trigger for scheduled news fetch
+app.post('/api/fetch-news', async (req, res) => {
+    try {
+        console.log('📡 Manual trigger: Starting news fetch and prediction generation...');
+        res.json({ 
+            success: true, 
+            message: 'News fetch started in background. Check server logs for progress.',
+            status: 'processing'
+        });
+        
+        // Run in background (don't wait for it)
+        fetchAndGeneratePredictions().catch(error => {
+            console.error('Error in manual news fetch:', error);
+        });
+    } catch (error) {
+        console.error('Error triggering news fetch:', error);
+        res.status(500).json({ error: 'Failed to trigger news fetch: ' + error.message });
     }
 });
 
@@ -656,6 +680,162 @@ app.post('/api/predict/from-url', async (req, res) => {
     }
 });
 
+// Scheduled task: Fetch new news and generate predictions every 30 minutes
+async function fetchAndGeneratePredictions() {
+    try {
+        console.log('\n🔄 [SCHEDULED] Starting automatic news fetch and prediction generation...');
+        
+        // Fetch latest articles from NYTimes (get 20 to have good coverage)
+        const articles = await scrapeNYTimesHomepage(20);
+        
+        if (articles.length === 0) {
+            console.log('⚠️  [SCHEDULED] No articles found. Skipping this run.');
+            return;
+        }
+        
+        console.log(`📰 [SCHEDULED] Found ${articles.length} articles from NYTimes`);
+        
+        // Get existing predictions to check for duplicates
+        let existingPredictions = [];
+        try {
+            if (usePostgres) {
+                existingPredictions = await db.find({});
+            } else {
+                existingPredictions = await new Promise((resolve, reject) => {
+                    db.find({}).sort({ created_at: -1 }).exec((err, results) => {
+                        if (err) reject(err);
+                        else resolve(results);
+                    });
+                });
+            }
+        } catch (error) {
+            console.error('❌ [SCHEDULED] Error fetching existing predictions:', error);
+        }
+        
+        // Extract article texts from existing predictions to check for duplicates
+        const existingArticleTexts = new Set();
+        existingPredictions.forEach(pred => {
+            if (pred.components && Array.isArray(pred.components)) {
+                pred.components.forEach(comp => {
+                    if (comp.text) {
+                        existingArticleTexts.add(comp.text.trim().toLowerCase());
+                    }
+                });
+            }
+        });
+        
+        console.log(`📊 [SCHEDULED] Found ${existingPredictions.length} existing predictions`);
+        console.log(`🆕 [SCHEDULED] Checking for new articles...`);
+        
+        let newCount = 0;
+        let duplicateCount = 0;
+        let errorCount = 0;
+        
+        // Process each article
+        for (let i = 0; i < articles.length; i++) {
+            const article = articles[i];
+            const articleText = article.text?.trim().toLowerCase() || '';
+            
+            // Skip if we've already generated a prediction for this article
+            if (existingArticleTexts.has(articleText)) {
+                duplicateCount++;
+                continue;
+            }
+            
+            try {
+                // Generate prediction for this new article
+                const singleElement = article;
+                const elementsArray = [singleElement];
+                
+                // Try AI generation first, fallback to template-based
+                let headline;
+                try {
+                    headline = await generateAIHeadline(elementsArray);
+                    if (!headline) {
+                        headline = generateSimpleDisaster(elementsArray);
+                    }
+                } catch (error) {
+                    console.error('❌ [SCHEDULED] Error generating headline, using fallback:', error.message);
+                    headline = generateSimpleDisaster(elementsArray);
+                }
+                
+                // Generate stock photo description
+                const stockPhotoDesc = generateStockPhotoDescription(elementsArray);
+                
+                // Generate image URL
+                const randomId = Math.floor(Math.random() * 1000);
+                const stockImageUrl = `https://picsum.photos/800/600?random=${randomId}`;
+                
+                const prediction = {
+                    components: elementsArray,
+                    headline: headline ? String(headline).replace(/[\x00-\x1F\x7F]/g, '').trim() : '',
+                    stockPhotoDescription: stockPhotoDesc ? String(stockPhotoDesc).replace(/[\x00-\x1F\x7F]/g, '').trim() : null,
+                    stockImageUrl: stockImageUrl || null,
+                    predicted_date: getTomorrowDate(),
+                    created_at: new Date(),
+                    came_true: false
+                };
+                
+                // Save to database
+                if (usePostgres) {
+                    await db.insert(prediction);
+                } else {
+                    await new Promise((resolve, reject) => {
+                        db.insert(prediction, (err, doc) => {
+                            if (err) reject(err);
+                            else resolve(doc);
+                        });
+                    });
+                }
+                
+                console.log(`  ✅ [${i + 1}/${articles.length}] Generated: ${headline.substring(0, 70)}...`);
+                newCount++;
+                
+                // Add to existing set to avoid duplicates in this batch
+                existingArticleTexts.add(articleText);
+                
+                // Small delay to avoid rate limiting
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+            } catch (error) {
+                console.error(`  ❌ [${i + 1}/${articles.length}] Error processing article:`, error.message);
+                errorCount++;
+            }
+        }
+        
+        console.log(`\n📊 [SCHEDULED] Summary:`);
+        console.log(`   ✅ New predictions generated: ${newCount}`);
+        console.log(`   ⏭️  Duplicates skipped: ${duplicateCount}`);
+        console.log(`   ❌ Errors: ${errorCount}`);
+        console.log(`   📰 Total articles processed: ${articles.length}`);
+        console.log(`✅ [SCHEDULED] Automatic fetch complete!\n`);
+        
+    } catch (error) {
+        console.error('❌ [SCHEDULED] Fatal error in scheduled task:', error);
+    }
+}
+
+// Schedule the task to run every 30 minutes
+// Cron format: '*/30 * * * *' = every 30 minutes
+// Disable if DISABLE_AUTO_FETCH is set (for testing)
+if (process.env.DISABLE_AUTO_FETCH !== 'true') {
+    cron.schedule('*/30 * * * *', fetchAndGeneratePredictions, {
+        scheduled: true,
+        timezone: "America/New_York"
+    });
+    console.log('✅ Scheduled task enabled: Fetching news and generating predictions every 30 minutes');
+    
+    // Run once on startup (after a short delay to let server fully initialize)
+    setTimeout(() => {
+        console.log('🚀 Running initial news fetch on startup...');
+        fetchAndGeneratePredictions().catch(error => {
+            console.error('Error in startup news fetch:', error);
+        });
+    }, 10000); // Wait 10 seconds after server starts
+} else {
+    console.log('⚠️  Scheduled task disabled (DISABLE_AUTO_FETCH=true)');
+}
+
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log('Routes available:');
@@ -666,4 +846,5 @@ app.listen(PORT, () => {
     console.log('  POST http://localhost:3001/api/populate/nytimes');
     console.log('  POST http://localhost:3001/api/populate/yesterday');
     console.log('  POST http://localhost:3001/api/cleanup/local');
+    console.log('  POST http://localhost:3001/api/fetch-news (manual trigger)');
 });

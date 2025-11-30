@@ -6,7 +6,9 @@ const express = require('express');
 const cors = require('cors');
 const Datastore = require('nedb');
 const cron = require('node-cron');
+const axios = require('axios');
 const { scrapeNYTimesHomepage } = require('./nytimesScraper');
+const { scrapeCNNWorld } = require('./cnnScraper');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -104,6 +106,56 @@ app.post('/api/populate/nytimes', async (req, res) => {
     } catch (error) {
         console.error('Error populating from NYTimes:', error);
         res.status(500).json({ error: 'Failed to populate from NYTimes: ' + error.message });
+    }
+});
+
+// CNN scraper route - populate database with CNN World articles
+app.post('/api/populate/cnn', async (req, res) => {
+    try {
+        const { scrapeCNNWorld } = require('./cnnScraper');
+        const count = req.body.count || 15;
+        
+        console.log(`📰 Populating database with ${count} CNN World articles...`);
+        
+        const articles = await scrapeCNNWorld(count);
+        
+        if (articles.length === 0) {
+            return res.status(400).json({ error: 'No articles found from CNN World' });
+        }
+        
+        const baseUrl = process.env.API_URL || 'http://localhost:3001';
+        let successCount = 0;
+        let errorCount = 0;
+        
+        for (let i = 0; i < articles.length; i++) {
+            const article = articles[i];
+            try {
+                const response = await axios.post(`${baseUrl}/api/predict`, {
+                    elements: [article]
+                }, {
+                    timeout: 30000
+                });
+                successCount++;
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            } catch (error) {
+                if (error.response?.status === 400 && error.response?.data?.error?.includes('already')) {
+                    // Already exists, skip
+                } else {
+                    errorCount++;
+                }
+            }
+        }
+        
+        res.json({ 
+            success: true, 
+            message: `Populated database with CNN World articles`,
+            total: articles.length,
+            success: successCount,
+            errors: errorCount
+        });
+    } catch (error) {
+        console.error('Error populating from CNN:', error);
+        res.status(500).json({ error: 'Failed to populate from CNN: ' + error.message });
     }
 });
 
@@ -685,15 +737,23 @@ async function fetchAndGeneratePredictions() {
     try {
         console.log('\n🔄 [SCHEDULED] Starting automatic news fetch and prediction generation...');
         
-        // Fetch latest articles from NYTimes (get 20 to have good coverage)
-        const articles = await scrapeNYTimesHomepage(20);
+        // Fetch latest articles from multiple sources
+        console.log('📰 [SCHEDULED] Fetching articles from NYTimes...');
+        const nytimesArticles = await scrapeNYTimesHomepage(15);
+        
+        console.log('📰 [SCHEDULED] Fetching articles from CNN World...');
+        const cnnArticles = await scrapeCNNWorld(15);
+        
+        // Combine articles from all sources
+        const articles = [...nytimesArticles, ...cnnArticles];
         
         if (articles.length === 0) {
-            console.log('⚠️  [SCHEDULED] No articles found. Skipping this run.');
+            console.log('⚠️  [SCHEDULED] No articles found from any source. Skipping this run.');
             return;
         }
         
-        console.log(`📰 [SCHEDULED] Found ${articles.length} articles from NYTimes`);
+        console.log(`📰 [SCHEDULED] Found ${nytimesArticles.length} articles from NYTimes, ${cnnArticles.length} from CNN World`);
+        console.log(`📰 [SCHEDULED] Total: ${articles.length} articles to process`);
         
         // Get existing predictions to check for duplicates
         let existingPredictions = [];
@@ -844,6 +904,7 @@ app.listen(PORT, () => {
     console.log('  POST http://localhost:3001/api/predict/from-url');
     console.log('  GET  http://localhost:3001/api/predictions');
     console.log('  POST http://localhost:3001/api/populate/nytimes');
+    console.log('  POST http://localhost:3001/api/populate/cnn');
     console.log('  POST http://localhost:3001/api/populate/yesterday');
     console.log('  POST http://localhost:3001/api/cleanup/local');
     console.log('  POST http://localhost:3001/api/fetch-news (manual trigger)');

@@ -739,20 +739,43 @@ async function fetchAndGeneratePredictions() {
         
         // Fetch latest articles from multiple sources
         console.log('📰 [SCHEDULED] Fetching articles from NYTimes...');
-        const nytimesArticles = await scrapeNYTimesHomepage(15);
+        const nytimesArticles = await scrapeNYTimesHomepage(12);
         
         console.log('📰 [SCHEDULED] Fetching articles from CNN World...');
-        const cnnArticles = await scrapeCNNWorld(15);
+        const cnnArticles = await scrapeCNNWorld(12);
+        
+        // Also fetch from News API (multiple categories)
+        let newsApiArticles = [];
+        if (process.env.NEWS_API_KEY) {
+            console.log('📰 [SCHEDULED] Fetching articles from News API (multiple categories)...');
+            try {
+                const { getMundaneElements } = require('./newsScraper');
+                const newsApiElements = await getMundaneElements();
+                // Convert to same format as scrapers
+                newsApiArticles = newsApiElements.map(el => ({
+                    type: el.type,
+                    text: el.text,
+                    source: el.source || 'News API',
+                    real: el.real || true,
+                    url: el.url || null
+                })).filter(el => el.text && el.text.length > 15); // Filter out fallback data
+                console.log(`📰 [SCHEDULED] Found ${newsApiArticles.length} articles from News API`);
+            } catch (error) {
+                console.error('⚠️  [SCHEDULED] Error fetching from News API:', error.message);
+            }
+        } else {
+            console.log('⚠️  [SCHEDULED] NEWS_API_KEY not set, skipping News API');
+        }
         
         // Combine articles from all sources
-        const articles = [...nytimesArticles, ...cnnArticles];
+        const articles = [...nytimesArticles, ...cnnArticles, ...newsApiArticles];
         
         if (articles.length === 0) {
             console.log('⚠️  [SCHEDULED] No articles found from any source. Skipping this run.');
             return;
         }
         
-        console.log(`📰 [SCHEDULED] Found ${nytimesArticles.length} articles from NYTimes, ${cnnArticles.length} from CNN World`);
+        console.log(`📰 [SCHEDULED] Found ${nytimesArticles.length} from NYTimes, ${cnnArticles.length} from CNN World, ${newsApiArticles.length} from News API`);
         console.log(`📰 [SCHEDULED] Total: ${articles.length} articles to process`);
         
         // Get existing predictions to check for duplicates

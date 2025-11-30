@@ -33,20 +33,6 @@ function StockImage({ url, position, scale = 1 }) {
     )
 }
 
-// Mobile Camera Controls Component
-function MobileCameraControls() {
-  const { camera } = useThree()
-  
-  useFrame(() => {
-    if (window.cameraRotationRef && window.cameraRotationRef.current) {
-      camera.rotation.x = window.cameraRotationRef.current.x
-      camera.rotation.y = window.cameraRotationRef.current.y
-    }
-  })
-
-  return null
-}
-
 // First Person Controller Component (keep as is)
 function Player() {
   const { camera } = useThree()
@@ -57,8 +43,6 @@ function Player() {
     s: false,
     d: false
   })
-  const touchMove = useRef({ x: 0, y: 0 })
-  const isMobile = useRef(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent))
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -84,28 +68,10 @@ function Player() {
     }
   }, [])
 
-  // Expose touch movement for mobile controls
-  useEffect(() => {
-    if (isMobile.current) {
-      window.touchMoveRef = touchMove
-    }
-  }, [])
-
   useFrame(() => {
     const direction = new THREE.Vector3()
-    
-    // Use keyboard or touch input
-    let front = Number(keys.current.s) - Number(keys.current.w)
-    let side = Number(keys.current.a) - Number(keys.current.d)
-    
-    // Add touch movement if available
-    if (isMobile.current && touchMove.current) {
-      front += touchMove.current.y
-      side += touchMove.current.x
-    }
-    
-    const frontVector = new THREE.Vector3(0, 0, front)
-    const sideVector = new THREE.Vector3(side, 0, 0)
+    const frontVector = new THREE.Vector3(0, 0, Number(keys.current.s) - Number(keys.current.w))
+    const sideVector = new THREE.Vector3(Number(keys.current.a) - Number(keys.current.d), 0, 0)
     
     direction
       .subVectors(frontVector, sideVector)
@@ -1410,7 +1376,7 @@ function Lobby({ predictions }) {
       />
       
       <Player />
-      {isMobile ? <MobileCameraControls /> : <PointerLockControls />}
+      <PointerLockControls />
     </>
   )
 }
@@ -1425,18 +1391,8 @@ function App() {
   const [urlError, setUrlError] = useState('')
   const [showUrlInput, setShowUrlInput] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [isMobile, setIsMobile] = useState(false)
-  const [joystickPosition, setJoystickPosition] = useState({ x: 0, y: 0 })
-  const touchLookRef = useRef({ x: 0, y: 0, isActive: false })
-  const joystickRef = useRef({ x: 0, y: 0, isActive: false })
-  const joystickStartRef = useRef({ x: 0, y: 0 })
-  const cameraRotationRef = useRef({ x: 0, y: 0 })
 
   useEffect(() => {
-    // Detect mobile device
-    const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-    setIsMobile(mobile)
-    
     fetchPredictions()
     
     // Don't auto-generate new predictions - just cycle through existing ones
@@ -1448,168 +1404,6 @@ function App() {
     
     return () => clearInterval(interval)
   }, [])
-
-  // Mobile touch controls for camera rotation (right side of screen)
-  useEffect(() => {
-    if (!isMobile) return
-
-    const canvas = document.querySelector('canvas')
-    if (!canvas) return
-
-    let lastTouch = null
-    let touchId = null
-
-    const handleTouchStart = (e) => {
-      for (let i = 0; i < e.touches.length; i++) {
-        const touch = e.touches[i]
-        const rect = canvas.getBoundingClientRect()
-        const x = touch.clientX - rect.left
-        const y = touch.clientY - rect.top
-        
-        // Check if touch is in right side (camera control area) and not on joystick
-        if (x > rect.width * 0.6 && !joystickRef.current.isActive) {
-          touchLookRef.current.isActive = true
-          touchId = touch.identifier
-          lastTouch = { x: touch.clientX, y: touch.clientY }
-          e.preventDefault()
-          break
-        }
-      }
-    }
-
-    const handleTouchMove = (e) => {
-      if (touchLookRef.current.isActive && touchId !== null) {
-        const touch = Array.from(e.touches).find(t => t.identifier === touchId)
-        if (!touch || !lastTouch) return
-        
-        const deltaX = touch.clientX - lastTouch.x
-        const deltaY = touch.clientY - lastTouch.y
-        
-        // Update camera rotation
-        cameraRotationRef.current.x -= deltaY * 0.002
-        cameraRotationRef.current.y -= deltaX * 0.002
-        
-        // Clamp vertical rotation
-        cameraRotationRef.current.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraRotationRef.current.x))
-        
-        lastTouch = { x: touch.clientX, y: touch.clientY }
-        e.preventDefault()
-      }
-    }
-
-    const handleTouchEnd = (e) => {
-      if (touchId !== null && !Array.from(e.touches).find(t => t.identifier === touchId)) {
-        touchLookRef.current.isActive = false
-        touchId = null
-        lastTouch = null
-      }
-    }
-
-    canvas.addEventListener('touchstart', handleTouchStart, { passive: false })
-    canvas.addEventListener('touchmove', handleTouchMove, { passive: false })
-    canvas.addEventListener('touchend', handleTouchEnd)
-    canvas.addEventListener('touchcancel', handleTouchEnd)
-
-    return () => {
-      canvas.removeEventListener('touchstart', handleTouchStart)
-      canvas.removeEventListener('touchmove', handleTouchMove)
-      canvas.removeEventListener('touchend', handleTouchEnd)
-      canvas.removeEventListener('touchcancel', handleTouchEnd)
-    }
-  }, [isMobile])
-
-  // Mobile joystick controls
-  useEffect(() => {
-    if (!isMobile) return
-
-    const joystickContainer = document.getElementById('mobile-joystick')
-    if (!joystickContainer) return
-
-    let joystickTouchId = null
-
-    const handleJoystickStart = (e) => {
-      const touch = e.touches[0]
-      const rect = joystickContainer.getBoundingClientRect()
-      joystickStartRef.current = {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2
-      }
-      joystickRef.current.isActive = true
-      joystickTouchId = touch.identifier
-      e.preventDefault()
-    }
-
-    const handleJoystickMove = (e) => {
-      if (!joystickRef.current.isActive) return
-      
-      const touch = Array.from(e.touches).find(t => t.identifier === joystickTouchId)
-      if (!touch) return
-
-      const rect = joystickContainer.getBoundingClientRect()
-      const centerX = rect.left + rect.width / 2
-      const centerY = rect.top + rect.height / 2
-      
-      const deltaX = touch.clientX - centerX
-      const deltaY = touch.clientY - centerY
-      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
-      const maxDistance = rect.width / 2
-
-      if (distance > maxDistance) {
-        const angle = Math.atan2(deltaY, deltaX)
-        joystickRef.current.x = Math.cos(angle) * maxDistance / maxDistance
-        joystickRef.current.y = Math.sin(angle) * maxDistance / maxDistance
-      } else {
-        joystickRef.current.x = deltaX / maxDistance
-        joystickRef.current.y = deltaY / maxDistance
-      }
-
-      // Update UI position
-      setJoystickPosition({ x: joystickRef.current.x, y: joystickRef.current.y })
-
-      // Update movement for Player component
-      if (window.touchMoveRef) {
-        window.touchMoveRef.current = {
-          x: joystickRef.current.x,
-          y: -joystickRef.current.y // Invert Y for forward/back
-        }
-      }
-
-      e.preventDefault()
-    }
-
-    const handleJoystickEnd = (e) => {
-      if (joystickTouchId !== null && !Array.from(e.touches).find(t => t.identifier === joystickTouchId)) {
-        joystickRef.current.isActive = false
-        joystickRef.current.x = 0
-        joystickRef.current.y = 0
-        joystickTouchId = null
-        setJoystickPosition({ x: 0, y: 0 })
-        
-        if (window.touchMoveRef) {
-          window.touchMoveRef.current = { x: 0, y: 0 }
-        }
-      }
-    }
-
-    joystickContainer.addEventListener('touchstart', handleJoystickStart, { passive: false })
-    window.addEventListener('touchmove', handleJoystickMove, { passive: false })
-    window.addEventListener('touchend', handleJoystickEnd)
-    window.addEventListener('touchcancel', handleJoystickEnd)
-
-    return () => {
-      joystickContainer.removeEventListener('touchstart', handleJoystickStart)
-      window.removeEventListener('touchmove', handleJoystickMove)
-      window.removeEventListener('touchend', handleJoystickEnd)
-      window.removeEventListener('touchcancel', handleJoystickEnd)
-    }
-  }, [isMobile])
-
-  // Expose camera rotation ref for mobile controls
-  useEffect(() => {
-    if (isMobile) {
-      window.cameraRotationRef = cameraRotationRef
-    }
-  }, [isMobile])
 
   // Keyboard shortcut for URL input - press 'u' to open, 'x' to close
   useEffect(() => {
@@ -1818,26 +1612,6 @@ function App() {
 
   return (
     <div className="app">
-      {/* Mobile Controls UI */}
-      {isMobile && (
-        <>
-          {/* Virtual Joystick for Movement */}
-          <div id="mobile-joystick" className="mobile-joystick">
-            <div 
-              className="joystick-handle"
-              style={{
-                transform: `translate(${joystickPosition.x * 40}px, ${joystickPosition.y * 40}px)`
-              }}
-            />
-          </div>
-          
-          {/* Camera Control Hint */}
-          <div className="mobile-camera-hint">
-            Drag right side to look around
-          </div>
-        </>
-      )}
-      
       {/* URL Input UI */}
       {showUrlInput && (
         <div className="url-input-overlay">

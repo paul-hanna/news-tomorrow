@@ -1610,8 +1610,34 @@ function App() {
     }
   }
 
+  // Audio element for background music
+  const audioRef = useRef(null)
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = 0.3 // Set volume to 30%
+      audioRef.current.loop = true
+      // Try to play, but handle autoplay restrictions
+      const playPromise = audioRef.current.play()
+      if (playPromise !== undefined) {
+        playPromise.catch(error => {
+          console.log('Audio autoplay prevented:', error)
+          // Autoplay might be blocked, user will need to interact first
+        })
+      }
+    }
+  }, [])
+
   return (
     <div className="app">
+      {/* Background Music */}
+      <audio
+        ref={audioRef}
+        src="/news-tomorrow/muzak.mp3"
+        preload="auto"
+        loop
+      />
+      
       {/* URL Input UI */}
       {showUrlInput && (
         <div className="url-input-overlay">
